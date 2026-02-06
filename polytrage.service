@@ -1,0 +1,35 @@
+[Unit]
+Description=Polytrage - Polymarket Arbitrage Scanner
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=polytrage
+Group=polytrage
+WorkingDirectory=/opt/polytrage
+ExecStart=/opt/polytrage/.venv/bin/polytrage --headless --paper
+Restart=on-failure
+RestartSec=30
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=polytrage
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/polytrage/data
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# Resource limits
+MemoryMax=512M
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,12 @@
+services:
+  polytrage:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - polytrage-data:/app/data
+      - ./polytrage.toml:/app/polytrage.toml:ro
+    command: ["--headless", "--paper"]
+
+volumes:
+  polytrage-data:

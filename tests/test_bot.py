@@ -91,12 +91,16 @@ class TestCLIArgs:
 
     def test_defaults(self):
         args = parse_args([])
-        assert args.interval == 60
-        assert args.min_profit == 0.005
-        assert args.max_markets == 100
-        assert args.fee_rate == 0.02
-        assert args.paper is False
+        # CLI defaults are None so config file values take precedence
+        assert args.interval is None
+        assert args.min_profit is None
+        assert args.max_markets is None
+        assert args.fee_rate is None
+        assert args.paper is None
         assert args.once is False
+        assert args.headless is False
+        assert args.command is None
+        assert args.config is None
 
     def test_custom_args(self):
         args = parse_args([

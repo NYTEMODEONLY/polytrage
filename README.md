@@ -56,7 +56,7 @@ pip install -e ".[dev]"
 ### Verify Installation
 
 ```bash
-# Run the full test suite (89 tests)
+# Run the full test suite (135 tests)
 pytest tests/ -v
 
 # Check the CLI
@@ -97,12 +97,33 @@ Skip order book fetches and use midpoint prices only (less accurate but much fas
 polytrage --once --no-orderbooks
 ```
 
+### Headless / VPS Mode
+
+Run on a server with log file output and suppressed Rich console:
+
+```bash
+polytrage --headless --paper
+```
+
+### Health Check
+
+Check if the bot is alive (used by Docker/systemd):
+
+```bash
+polytrage health
+# Exit 0 = healthy, Exit 1 = stale/missing heartbeat
+```
+
 ### All Options
 
 ```
 polytrage --help
 
+Commands:
+  health                    Check bot health (exit 0=ok, 1=stale)
+
 Options:
+  --config PATH             Path to TOML config file (default: polytrage.toml)
   --interval INTERVAL       Scan interval in seconds (default: 60)
   --min-profit MIN_PROFIT   Minimum net profit threshold in dollars (default: 0.005)
   --max-markets MAX_MARKETS Maximum markets to scan (default: 100)
@@ -112,6 +133,7 @@ Options:
   --min-liquidity FLOAT     Minimum market liquidity filter
   --min-volume FLOAT        Minimum market volume filter
   --once                    Run a single scan and exit
+  --headless                VPS mode: suppress Rich output, log WARNING+ to console
   -v, --verbose             Enable debug logging
 ```
 
@@ -209,17 +231,104 @@ Summary
   Market is efficiently priced — no arbitrage detected.
 ```
 
+## Configuration
+
+Polytrage uses a layered config system. Priority: **CLI args > env vars > TOML file > defaults**.
+
+```bash
+cp polytrage.example.toml polytrage.toml
+# Edit polytrage.toml to your needs
+```
+
+Key env vars (override any TOML setting):
+
+| Variable | Description |
+|----------|-------------|
+| `POLYTRAGE_DISCORD_WEBHOOK` | Discord webhook URL for notifications |
+| `POLYTRAGE_LOG_LEVEL` | Log level: DEBUG, INFO, WARNING, ERROR |
+| `POLYTRAGE_SCAN_INTERVAL` | Scan interval in seconds |
+| `POLYTRAGE_MAX_MARKETS` | Max markets per scan |
+
+See `polytrage.example.toml` for all options.
+
+## Notifications
+
+Set a Discord webhook to receive alerts:
+
+```bash
+export POLYTRAGE_DISCORD_WEBHOOK="https://discord.com/api/webhooks/..."
+```
+
+Notifications include:
+- **Startup** (blue) — bot started with config summary
+- **Arbitrage found** (green) — market, profit, ROI (5-min per-market cooldown)
+- **Error** (red) — circuit breaker triggered, critical failures
+
+Webhook failures are logged as warnings and never crash the bot.
+
+## Production Deployment
+
+### Docker
+
+```bash
+cp polytrage.example.toml polytrage.toml
+cp .env.example .env
+# Edit .env with your Discord webhook, etc.
+
+docker compose up -d
+docker compose logs -f
+```
+
+The container includes a `HEALTHCHECK` that runs `polytrage health` every 2 minutes.
+
+### systemd
+
+```bash
+# Create service user
+sudo useradd -r -s /bin/false polytrage
+sudo mkdir -p /opt/polytrage/data
+sudo chown polytrage:polytrage /opt/polytrage/data
+
+# Install
+cd /opt/polytrage
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+
+# Copy config
+cp polytrage.example.toml polytrage.toml
+
+# Install service
+sudo cp polytrage.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now polytrage
+sudo journalctl -u polytrage -f
+```
+
+### Error Recovery
+
+The bot survives crashes automatically:
+- **Exponential backoff**: 30s → 60s → 120s → ... → 10min cap on consecutive failures
+- **Circuit breaker**: 10 consecutive failures → shutdown + Discord alert
+- **HTTP client refresh**: Recreates the connection pool every hour to avoid stale connections
+- **Trade persistence**: Paper trades are saved to `trades.jsonl` and loaded on restart
+
 ## Architecture
 
 ```
 src/polytrage/
-├── models.py      # Pydantic data models (Market, OrderBook, ArbitrageOpportunity)
-├── api.py         # Async Polymarket API client (Gamma + CLOB)
-├── arbitrage.py   # Arbitrage detection engine (binary + NegRisk markets)
-├── profit.py      # KL divergence, Frank-Wolfe gap, profit guarantees
-├── scanner.py     # Market scanner (orchestrates API + detection pipeline)
-├── bot.py         # CLI entry point, Rich terminal output, paper trading
-└── diagnose.py    # Market efficiency diagnostic tool
+├── models.py         # Pydantic data models (Market, OrderBook, ArbitrageOpportunity)
+├── api.py            # Async Polymarket API client (Gamma + CLOB)
+├── arbitrage.py      # Arbitrage detection engine (binary + NegRisk markets)
+├── profit.py         # KL divergence, Frank-Wolfe gap, profit guarantees
+├── scanner.py        # Market scanner (orchestrates API + detection pipeline)
+├── bot.py            # CLI entry point, Rich terminal output, paper trading
+├── config.py         # TOML config loading + env var overrides
+├── logging_setup.py  # Rotating file + console log handlers
+├── notify.py         # Discord webhook notifications
+├── health.py         # Heartbeat file + health check subcommand
+├── storage.py        # JSON-lines trade persistence
+└── diagnose.py       # Market efficiency diagnostic tool
 ```
 
 ### API Endpoints Used
@@ -233,7 +342,7 @@ src/polytrage/
 
 ## Testing
 
-Polytrage has a comprehensive test suite covering every module — 89 tests across 6 test files, all passing.
+Polytrage has a comprehensive test suite covering every module — 135 tests across 10 test files, all passing.
 
 ```bash
 # Run the full suite
@@ -246,6 +355,10 @@ pytest tests/test_api.py -v          # 11 tests — market parsing, HTTP client,
 pytest tests/test_scanner.py -v      #  6 tests — full pipeline, filters, multi-market, error resilience
 pytest tests/test_bot.py -v          # 11 tests — paper portfolio, CLI args, Rich tables, scan loop
 pytest tests/test_e2e_simulation.py  # 13 tests — end-to-end simulation with realistic scenarios
+pytest tests/test_config.py -v       # 12 tests — TOML loading, env vars, defaults, overrides
+pytest tests/test_notify.py -v       # 14 tests — Discord webhook, cooldown, enable/disable
+pytest tests/test_health.py -v       #  9 tests — heartbeat write/read, stale detection
+pytest tests/test_storage.py -v      # 11 tests — JSONL persistence, memory cap, load/save
 ```
 
 ### Test Results
@@ -254,11 +367,15 @@ pytest tests/test_e2e_simulation.py  # 13 tests — end-to-end simulation with r
 tests/test_api.py            11 passed    Market parsing, HTTP mocks, orderbook/price/midpoint fetching
 tests/test_arbitrage.py      17 passed    Binary arb, NegRisk arb, orderbook detection, edge cases
 tests/test_bot.py            11 passed    Paper portfolio, CLI args, Rich tables, scan loop
+tests/test_config.py         12 passed    TOML loading, env var overrides, layered defaults
+tests/test_e2e_simulation.py 13 passed    End-to-end simulation with realistic market scenarios
+tests/test_health.py          9 passed    Heartbeat write/read, stale detection, missing files
+tests/test_notify.py         14 passed    Discord webhook, cooldown, enable/disable flags
 tests/test_profit.py         23 passed    KL divergence, FW gap, guarantees, α-extraction, boundaries
 tests/test_scanner.py         6 passed    Full pipeline, midpoint mode, liquidity filter, error handling
-tests/test_e2e_simulation.py 11 passed    End-to-end simulation with realistic market scenarios
+tests/test_storage.py        11 passed    JSONL persistence, memory cap, load/save, malformed data
 
-89 passed in ~8s
+135 passed in ~7s
 ```
 
 ### Test Coverage Breakdown
@@ -269,6 +386,10 @@ tests/test_e2e_simulation.py 11 passed    End-to-end simulation with realistic m
 - Frank-Wolfe gap convergence (gap decreases as θ approaches μ̂, non-negative guarantee)
 - Profit guarantees (Proposition 4.1: D-g, clamping, α-extraction at 90%)
 - API response parsing (JSON string fields, missing data, list vs string format)
+- Config loading (TOML, env vars, layered overrides, invalid input handling)
+- Discord notifications (webhook delivery, cooldown dedup, graceful failure)
+- Health monitoring (heartbeat write/read, stale threshold, malformed data)
+- Trade persistence (JSONL append, memory cap trimming, load on restart)
 
 **Integration Tests** — Scanner pipeline with mocked HTTP:
 - Full scan: fetch markets → pre-filter → deep scan order books → sort by ROI

@@ -8,3 +8,10 @@ build/
 .pytest_cache/
 *.egg
 .DS_Store
+
+# Runtime data
+*.log
+polytrage.log*
+heartbeat.json
+trades.jsonl
+polytrage.toml

@@ -1,0 +1,43 @@
+# Polytrage Configuration
+# Copy to polytrage.toml and adjust as needed.
+
+# headless = false  # VPS mode: suppress Rich console output
+# paper = false     # Paper trading mode (simulate trades, track P&L)
+
+[scan]
+interval = 60           # Scan interval in seconds
+min_profit = 0.005      # Minimum net profit threshold ($)
+max_markets = 100       # Maximum markets to scan per cycle
+fee_rate = 0.02         # Fee rate on winnings (2%)
+use_orderbooks = true   # Fetch real order books (slower but accurate)
+min_liquidity = 0.0     # Minimum market liquidity filter
+min_volume = 0.0        # Minimum market volume filter
+
+[api]
+concurrency = 10        # Max concurrent API requests
+timeout = 15.0          # HTTP request timeout (seconds)
+max_retries = 3         # Retry count for failed requests
+client_refresh_interval = 3600  # Recreate HTTP client every N seconds
+
+[log]
+level = "INFO"          # DEBUG, INFO, WARNING, ERROR
+file = "polytrage.log"  # Log file path
+max_bytes = 10485760    # Max log file size (10 MB)
+backup_count = 5        # Number of rotated log files to keep
+
+[notify]
+discord_webhook = ""    # Discord webhook URL (or set POLYTRAGE_DISCORD_WEBHOOK)
+cooldown = 300          # Per-market notification cooldown (seconds)
+on_startup = true       # Notify on bot startup
+on_error = true         # Notify on circuit breaker / critical errors
+on_arb = true           # Notify on arbitrage opportunities found
+
+[health]
+enabled = true          # Write heartbeat file after each scan
+heartbeat_file = "heartbeat.json"
+stale_threshold = 300   # Seconds before health check considers bot stale
+
+[storage]
+enabled = true          # Persist paper trades to disk
+trades_file = "trades.jsonl"
+max_memory = 1000       # Max trades to keep in memory

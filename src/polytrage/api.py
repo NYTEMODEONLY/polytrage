@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -20,6 +21,7 @@ DEFAULT_CONCURRENCY = 10
 DEFAULT_TIMEOUT = 15.0
 MAX_RETRIES = 3
 RETRY_BACKOFF = 1.0
+DEFAULT_CLIENT_REFRESH = 3600  # Recreate HTTP client every hour
 
 
 class PolymarketAPIError(Exception):
@@ -34,17 +36,37 @@ class PolymarketClient:
         *,
         concurrency: int = DEFAULT_CONCURRENCY,
         timeout: float = DEFAULT_TIMEOUT,
+        client_refresh_interval: int = DEFAULT_CLIENT_REFRESH,
     ) -> None:
         self._semaphore = asyncio.Semaphore(concurrency)
         self._timeout = timeout
+        self._client_refresh_interval = client_refresh_interval
         self._client: httpx.AsyncClient | None = None
+        self._client_created_at: float = 0.0
 
     async def _get_client(self) -> httpx.AsyncClient:
+        now = time.monotonic()
+        needs_refresh = (
+            self._client is not None
+            and not self._client.is_closed
+            and self._client_refresh_interval > 0
+            and (now - self._client_created_at) >= self._client_refresh_interval
+        )
+        if needs_refresh:
+            logger.info("Refreshing HTTP client (age: %.0fs)", now - self._client_created_at)
+            await self._client.aclose()
+            self._client = None
+
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self._timeout),
                 headers={"Accept": "application/json"},
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                ),
             )
+            self._client_created_at = now
         return self._client
 
     async def close(self) -> None:
